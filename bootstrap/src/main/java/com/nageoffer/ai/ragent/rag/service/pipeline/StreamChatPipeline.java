@@ -132,6 +132,9 @@ public class StreamChatPipeline {
 
     private boolean handleSystemOnly(StreamChatContext ctx) {
         List<SubQuestionIntent> subIntents = ctx.getSubIntents();
+        if (CollUtil.isEmpty(subIntents)) {
+            return false;
+        }
         boolean allSystemOnly = subIntents.stream()
                 .allMatch(si -> intentResolver.isSystemOnly(si.nodeScores()));
         if (!allSystemOnly) {
@@ -161,10 +164,39 @@ public class StreamChatPipeline {
         if (!retrievalCtx.isEmpty()) {
             return false;
         }
-        StreamCallback callback = ctx.getCallback();
-        callback.onContent("未检索到与问题相关的文档内容。");
-        callback.onComplete();
+        try {
+            StreamCancellationHandle handle = streamSystemResponse(
+                    ctx.getRewriteResult().rewrittenQuestion(),
+                    ctx.getHistory(),
+                    null,
+                    ctx.getCallback()
+            );
+            taskManager.bindHandle(ctx.getTaskId(), handle);
+        } catch (Exception e) {
+            log.warn("空检索场景系统回答失败，使用本地兜底响应, question={}", ctx.getQuestion(), e);
+            StreamCallback callback = ctx.getCallback();
+            callback.onContent(buildLocalFallbackAnswer(ctx.getQuestion()));
+            callback.onComplete();
+        }
         return true;
+    }
+
+    private String buildLocalFallbackAnswer(String question) {
+        if (StrUtil.isBlank(question)) {
+            return "我目前没有收到明确的问题。你可以继续输入需要查询或咨询的内容。";
+        }
+        String normalized = question.trim().toLowerCase();
+        if (normalized.contains("你可以做什么")
+                || normalized.contains("你能做什么")
+                || normalized.contains("你是谁")
+                || normalized.contains("能做什么")
+                || normalized.contains("可以做什么")) {
+            return "我是企业知识助手小码，可以帮你查询知识库内容、梳理企业内部流程、回答系统使用问题，也可以在配置了 MCP 工具后查询天气、工单、销售等实时数据。";
+        }
+        if (normalized.contains("天气")) {
+            return "当前没有检索到相关知识库内容，并且大模型或 MCP 参数提取服务暂不可用。请确认后端启动时已配置模型 API Key，或稍后再试天气查询。";
+        }
+        return "当前没有检索到相关知识库内容。你可以补充问题背景，或确认后端启动时已配置可用的大模型服务。";
     }
 
     private void streamRagResponse(StreamChatContext ctx, RetrievalContext retrievalCtx) {

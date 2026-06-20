@@ -21,6 +21,7 @@ import {
   Upload,
   Users,
   FolderKanban,
+  Bot,
   Workflow
 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
@@ -128,6 +129,11 @@ const menuGroups: MenuGroup[] = [
         label: "链路追踪",
         icon: Workflow
       },
+      {
+        path: "/admin/agent/knowledge-ops",
+        label: "KnowledgeOps Agent",
+        icon: Bot
+      },
     ]
   },
   {
@@ -158,6 +164,7 @@ const breadcrumbMap: Record<string, string> = {
   "intent-tree": "意图树配置",
   "intent-list": "意图列表",
   ingestion: "数据通道",
+  agent: "Agent",
   traces: "链路追踪",
   "sample-questions": "示例问题",
   mappings: "关键词映射",

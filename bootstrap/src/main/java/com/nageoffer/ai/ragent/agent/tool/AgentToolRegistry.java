@@ -15,28 +15,30 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent;
+package com.nageoffer.ai.ragent.agent.tool;
 
-import org.mybatis.spring.annotation.MapperScan;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.scheduling.annotation.EnableScheduling;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
 
-/**
- * Ragent 核心应用启动类
- */
-@SpringBootApplication
-@EnableScheduling
-@MapperScan(basePackages = {
-        "com.nageoffer.ai.ragent.rag.dao.mapper",
-        "com.nageoffer.ai.ragent.agent.dao.mapper",
-        "com.nageoffer.ai.ragent.ingestion.dao.mapper",
-        "com.nageoffer.ai.ragent.knowledge.dao.mapper",
-        "com.nageoffer.ai.ragent.user.dao.mapper"
-})
-public class RagentApplication {
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
-    public static void main(String[] args) {
-        SpringApplication.run(RagentApplication.class, args);
+@Component
+@RequiredArgsConstructor
+public class AgentToolRegistry {
+
+    private final List<AgentTool> tools;
+
+    public List<AgentTool> orderedTools() {
+        return tools.stream()
+                .sorted(Comparator.comparing(AgentTool::name))
+                .toList();
+    }
+
+    public Map<String, AgentTool> toolMap() {
+        return tools.stream().collect(Collectors.toMap(AgentTool::name, Function.identity()));
     }
 }
