@@ -16,7 +16,6 @@
  */
 
 package com.nageoffer.ai.ragent.knowledge.schedule;
-
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.nageoffer.ai.ragent.knowledge.config.KnowledgeScheduleProperties;
 import com.nageoffer.ai.ragent.knowledge.dao.entity.KnowledgeDocumentScheduleDO;
