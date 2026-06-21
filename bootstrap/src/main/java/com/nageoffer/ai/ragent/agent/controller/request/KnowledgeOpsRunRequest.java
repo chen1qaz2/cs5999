@@ -32,4 +32,10 @@ public class KnowledgeOpsRunRequest {
     private Integer topK;
 
     private Boolean enableLlmEvaluation;
+
+    private String scenario;
+
+    private java.util.List<String> workflow;
+
+    private java.util.List<String> benchmarkQuestions;
 }

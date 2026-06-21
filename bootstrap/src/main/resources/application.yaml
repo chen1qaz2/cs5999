@@ -57,6 +57,12 @@ rag:
   rerank:
     enabled: true
 
+  fallback:
+    enabled: true
+    direct-basic-question-enabled: true
+    low-confidence-enabled: true
+    min-relevant-score: 0.35
+
   rate-limit:
     global:
       enabled: true
@@ -214,3 +220,56 @@ app:
   demo-mode: false
   eval:
     enabled: true
+
+agent:
+  knowledge-ops:
+    planner-enabled: true
+    max-steps: 8
+    stale-document-days: 90
+    sensitive-scan-limit: 500
+    benchmark-question-limit: 8
+    benchmark-min-score: 0.45
+    gap-sample-limit: 5
+    default-workflow:
+      - knowledge-base-profile
+      - document-freshness-check
+      - knowledge-retrieval
+      - question-set-benchmark
+      - retrieval-gap-analyze
+      - chunk-quality-inspect
+      - coverage-evaluate
+    workflows:
+      quality:
+        - knowledge-base-profile
+        - document-freshness-check
+        - knowledge-retrieval
+        - question-set-benchmark
+        - retrieval-gap-analyze
+        - chunk-quality-inspect
+        - coverage-evaluate
+      retrieval:
+        - knowledge-base-profile
+        - knowledge-retrieval
+        - question-set-benchmark
+        - retrieval-gap-analyze
+        - coverage-evaluate
+      security:
+        - knowledge-base-profile
+        - sensitive-info-detect
+        - document-freshness-check
+        - chunk-quality-inspect
+        - coverage-evaluate
+      release:
+        - knowledge-base-profile
+        - document-freshness-check
+        - sensitive-info-detect
+        - knowledge-retrieval
+        - question-set-benchmark
+        - retrieval-gap-analyze
+        - chunk-quality-inspect
+        - coverage-evaluate
+      benchmark:
+        - knowledge-base-profile
+        - question-set-benchmark
+        - retrieval-gap-analyze
+        - coverage-evaluate

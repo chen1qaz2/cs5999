@@ -20,7 +20,9 @@ package com.nageoffer.ai.ragent.agent.domain;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Data
@@ -34,6 +36,16 @@ public class KnowledgeOpsContext {
     private String task;
 
     private Integer topK;
+
+    private String scenario;
+
+    @Builder.Default
+    private List<String> requestedWorkflow = new ArrayList<>();
+
+    @Builder.Default
+    private List<String> benchmarkQuestions = new ArrayList<>();
+
+    private AgentPlan plan;
 
     @Builder.Default
     private Map<String, AgentToolResult> toolResults = new LinkedHashMap<>();

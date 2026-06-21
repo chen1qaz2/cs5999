@@ -86,6 +86,12 @@ public class RAGConstant {
     public static final String CHAT_SYSTEM_PROMPT_PATH = "prompt/answer-chat-system.st";
 
     /**
+     * 通用兜底回答提示词模板路径
+     * 用于知识库未命中、命中质量过低或基础闲聊问题场景。
+     */
+    public static final String CHAT_FALLBACK_PROMPT_PATH = "prompt/answer-chat-fallback.st";
+
+    /**
      * 查询改写 + 多问句拆分提示词模板路径
      * 要求同时返回改写后的单条查询和子问题列表
      */

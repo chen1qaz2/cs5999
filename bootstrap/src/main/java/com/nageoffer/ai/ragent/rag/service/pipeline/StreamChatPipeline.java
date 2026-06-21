@@ -21,9 +21,12 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
+import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
 import com.nageoffer.ai.ragent.infra.chat.StreamCallback;
 import com.nageoffer.ai.ragent.infra.chat.StreamCancellationHandle;
+import com.nageoffer.ai.ragent.rag.config.RagFallbackProperties;
+import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import com.nageoffer.ai.ragent.rag.core.guidance.GuidanceDecision;
 import com.nageoffer.ai.ragent.rag.core.guidance.IntentGuidanceService;
 import com.nageoffer.ai.ragent.rag.core.intent.IntentResolver;
@@ -37,7 +40,6 @@ import com.nageoffer.ai.ragent.rag.core.rewrite.RewriteResult;
 import com.nageoffer.ai.ragent.rag.dto.IntentGroup;
 import com.nageoffer.ai.ragent.rag.dto.RetrievalContext;
 import com.nageoffer.ai.ragent.rag.dto.SubQuestionIntent;
-import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import com.nageoffer.ai.ragent.rag.service.handler.StreamTaskManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -45,7 +47,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
+import static com.nageoffer.ai.ragent.rag.constant.RAGConstant.CHAT_FALLBACK_PROMPT_PATH;
 import static com.nageoffer.ai.ragent.rag.constant.RAGConstant.CHAT_SYSTEM_PROMPT_PATH;
 
 /**
@@ -67,6 +71,7 @@ public class StreamChatPipeline {
     private final IntentResolver intentResolver;
     private final IntentGuidanceService guidanceService;
     private final RetrievalEngine retrievalEngine;
+    private final RagFallbackProperties fallbackProperties;
     private final LLMService llmService;
     private final RAGPromptService promptBuilder;
     private final PromptTemplateLoader promptTemplateLoader;
@@ -86,9 +91,12 @@ public class StreamChatPipeline {
         if (handleSystemOnly(ctx)) {
             return;
         }
+        if (handleDirectFallback(ctx)) {
+            return;
+        }
 
         RetrievalContext retrievalCtx = retrieve(ctx);
-        if (handleEmptyRetrieval(ctx, retrievalCtx)) {
+        if (handleFallbackRetrieval(ctx, retrievalCtx)) {
             return;
         }
 
@@ -160,25 +168,81 @@ public class StreamChatPipeline {
         return retrievalEngine.retrieve(ctx.getSubIntents(), searchProperties.getDefaultTopK());
     }
 
-    private boolean handleEmptyRetrieval(StreamChatContext ctx, RetrievalContext retrievalCtx) {
-        if (!retrievalCtx.isEmpty()) {
+    private boolean handleDirectFallback(StreamChatContext ctx) {
+        if (!fallbackProperties.isEnabled()
+                || !fallbackProperties.isDirectBasicQuestionEnabled()
+                || !isBasicFallbackQuestion(ctx.getQuestion())) {
             return false;
         }
+        streamFallbackResponse(ctx, "basic-question");
+        return true;
+    }
+
+    private boolean handleFallbackRetrieval(StreamChatContext ctx, RetrievalContext retrievalCtx) {
+        if (retrievalCtx.isEmpty()) {
+            streamFallbackResponse(ctx, "empty-retrieval");
+            return true;
+        }
+        if (isLowConfidenceRetrieval(retrievalCtx)) {
+            streamFallbackResponse(ctx, "low-confidence-retrieval");
+            return true;
+        }
+        return false;
+    }
+
+    private void streamFallbackResponse(StreamChatContext ctx, String reason) {
         try {
+            log.info("RAG 进入兜底回答, reason={}, question={}", reason, ctx.getQuestion());
             StreamCancellationHandle handle = streamSystemResponse(
                     ctx.getRewriteResult().rewrittenQuestion(),
                     ctx.getHistory(),
-                    null,
+                    promptTemplateLoader.load(CHAT_FALLBACK_PROMPT_PATH),
                     ctx.getCallback()
             );
             taskManager.bindHandle(ctx.getTaskId(), handle);
         } catch (Exception e) {
-            log.warn("空检索场景系统回答失败，使用本地兜底响应, question={}", ctx.getQuestion(), e);
+            log.warn("兜底回答调用大模型失败，使用本地降级响应, reason={}, question={}", reason, ctx.getQuestion(), e);
             StreamCallback callback = ctx.getCallback();
             callback.onContent(buildLocalFallbackAnswer(ctx.getQuestion()));
             callback.onComplete();
         }
-        return true;
+    }
+
+    private boolean isLowConfidenceRetrieval(RetrievalContext retrievalCtx) {
+        if (!fallbackProperties.isEnabled()
+                || !fallbackProperties.isLowConfidenceEnabled()
+                || retrievalCtx.hasMcp()) {
+            return false;
+        }
+        Map<String, List<RetrievedChunk>> intentChunks = retrievalCtx.getIntentChunks();
+        if (CollUtil.isEmpty(intentChunks)) {
+            return false;
+        }
+        double maxScore = intentChunks.values().stream()
+                .filter(CollUtil::isNotEmpty)
+                .flatMap(List::stream)
+                .map(RetrievedChunk::getScore)
+                .filter(score -> score != null)
+                .mapToDouble(Float::doubleValue)
+                .max()
+                .orElse(Double.NaN);
+        return !Double.isNaN(maxScore) && maxScore < fallbackProperties.getMinRelevantScore();
+    }
+
+    private boolean isBasicFallbackQuestion(String question) {
+        if (StrUtil.isBlank(question)) {
+            return true;
+        }
+        String normalized = question.trim().toLowerCase();
+        String compact = normalized.replaceAll("\\s+", "");
+        return compact.matches("^(你好|您好|嗨|哈喽|hello|hi|hey|在吗|早上好|上午好|中午好|下午好|晚上好)[!！。？?]*$")
+                || compact.contains("你是谁")
+                || compact.contains("你能做什么")
+                || compact.contains("你可以做什么")
+                || compact.contains("你是什么")
+                || compact.contains("介绍一下你自己")
+                || compact.equals("help")
+                || compact.equals("帮助");
     }
 
     private String buildLocalFallbackAnswer(String question) {
@@ -191,12 +255,21 @@ public class StreamChatPipeline {
                 || normalized.contains("你是谁")
                 || normalized.contains("能做什么")
                 || normalized.contains("可以做什么")) {
-            return "我是企业知识助手小码，可以帮你查询知识库内容、梳理企业内部流程、回答系统使用问题，也可以在配置了 MCP 工具后查询天气、工单、销售等实时数据。";
+            return "我是企业知识助手小码，可以帮你查询知识库内容、梳理企业内部流程、回答系统使用问题；当知识库暂时没有相关内容时，也可以回答基础概念、日常说明和一般性技术问题。";
+        }
+        if (normalized.contains("rag")) {
+            return "RAG 是检索增强生成：先从外部知识源检索相关资料，再把资料交给大模型生成回答。它适合企业知识库问答，因为可以让回答尽量贴近公司已有文档。";
+        }
+        if (normalized.contains("agent") || normalized.contains("智能体")) {
+            return "AI Agent 通常指能够理解目标、规划步骤、调用工具并根据结果继续行动的智能体。相比普通问答，它更强调任务执行和闭环。";
+        }
+        if (normalized.contains("java")) {
+            return "Java 是一种面向对象的编程语言，常用于后端服务、企业应用、Android 生态和大数据组件开发，特点是跨平台、生态成熟、工程化能力强。";
         }
         if (normalized.contains("天气")) {
-            return "当前没有检索到相关知识库内容，并且大模型或 MCP 参数提取服务暂不可用。请确认后端启动时已配置模型 API Key，或稍后再试天气查询。";
+            return "天气属于实时信息，当前没有可用的实时工具结果。如果系统接入了 MCP 天气工具，我可以根据城市和日期继续查询。";
         }
-        return "当前没有检索到相关知识库内容。你可以补充问题背景，或确认后端启动时已配置可用的大模型服务。";
+        return "当前没有可用的大模型兜底响应。对于企业内部制度、流程或业务数据问题，请补充相关知识库文档后再问；对于一般基础问题，可以稍后在模型服务恢复后继续提问。";
     }
 
     private void streamRagResponse(StreamChatContext ctx, RetrievalContext retrievalCtx) {

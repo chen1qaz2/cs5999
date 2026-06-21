@@ -17,35 +17,16 @@
 
 package com.nageoffer.ai.ragent.agent.domain;
 
-import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
-import lombok.NoArgsConstructor;
-
-import java.util.List;
-import java.util.Map;
 
 @Data
 @Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class KnowledgeOpsReport {
+public class AgentPlanStep {
 
-    private String coverageLevel;
+    private int order;
 
-    private Integer coverageScore;
+    private String toolName;
 
-    private String scenario;
-
-    private String planReason;
-
-    private String summary;
-
-    private List<String> findings;
-
-    private List<String> recommendations;
-
-    private Map<String, Object> metrics;
-
-    private String markdown;
+    private String reason;
 }

@@ -13,14 +13,20 @@ export interface KnowledgeOpsRunRequest {
   task: string;
   topK?: number;
   enableLlmEvaluation?: boolean;
+  scenario?: string;
+  workflow?: string[];
+  benchmarkQuestions?: string[];
 }
 
 export interface KnowledgeOpsReport {
   coverageLevel?: string;
   coverageScore?: number;
+  scenario?: string;
+  planReason?: string;
   summary?: string;
   findings?: string[];
   recommendations?: string[];
+  metrics?: Record<string, unknown>;
   markdown?: string;
 }
 

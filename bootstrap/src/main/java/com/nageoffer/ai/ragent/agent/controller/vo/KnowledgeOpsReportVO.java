@@ -23,6 +23,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.util.Map;
 
 @Data
 @Builder
@@ -34,11 +35,17 @@ public class KnowledgeOpsReportVO {
 
     private Integer coverageScore;
 
+    private String scenario;
+
+    private String planReason;
+
     private String summary;
 
     private List<String> findings;
 
     private List<String> recommendations;
+
+    private Map<String, Object> metrics;
 
     private String markdown;
 }

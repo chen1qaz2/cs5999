@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Bot, CheckCircle2, FileText, Loader2, Play, Search, ShieldAlert } from "lucide-react";
+import { Activity, BarChart3, Bot, CheckCircle2, FileText, Loader2, Play, Search, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,19 @@ import {
 } from "@/services/knowledgeOpsAgentService";
 
 const DEFAULT_TASK = "Evaluate whether this knowledge base can answer employee reimbursement process questions.";
+const DEFAULT_BENCHMARK_QUESTIONS = [
+  "How do employees submit reimbursement?",
+  "What materials are required for reimbursement?",
+  "How long does reimbursement approval usually take?"
+].join("\n");
+
+const SCENARIOS = [
+  { value: "quality", label: "Quality" },
+  { value: "retrieval", label: "Retrieval" },
+  { value: "benchmark", label: "Benchmark" },
+  { value: "security", label: "Security" },
+  { value: "release", label: "Release" }
+];
 
 function statusVariant(status?: string) {
   if (status === "SUCCESS") return "default";
@@ -33,10 +46,25 @@ function parseToolSummary(step: KnowledgeOpsStep) {
   }
 }
 
+function metricValue(metrics: Record<string, unknown> | undefined, key: string, fallback = "--") {
+  const value = metrics?.[key];
+  if (value === undefined || value === null || value === "") return fallback;
+  return String(value);
+}
+
+function parseBenchmarkQuestions(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export function KnowledgeOpsAgentPage() {
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [kbId, setKbId] = useState("");
   const [task, setTask] = useState(DEFAULT_TASK);
+  const [scenario, setScenario] = useState("quality");
+  const [benchmarkQuestions, setBenchmarkQuestions] = useState(DEFAULT_BENCHMARK_QUESTIONS);
   const [running, setRunning] = useState(false);
   const [activeRun, setActiveRun] = useState<KnowledgeOpsRun | null>(null);
   const [history, setHistory] = useState<KnowledgeOpsRun[]>([]);
@@ -83,7 +111,9 @@ export function KnowledgeOpsAgentPage() {
         kbId,
         task: task.trim(),
         topK: 8,
-        enableLlmEvaluation: false
+        enableLlmEvaluation: false,
+        scenario,
+        benchmarkQuestions: parseBenchmarkQuestions(benchmarkQuestions)
       });
       setActiveRun(run);
       await refreshHistory();
@@ -97,6 +127,7 @@ export function KnowledgeOpsAgentPage() {
 
   const steps = activeRun?.steps || [];
   const report = activeRun?.report;
+  const metrics = report?.metrics;
 
   return (
     <div className="space-y-6">
@@ -122,7 +153,7 @@ export function KnowledgeOpsAgentPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-[280px_minmax(0,1fr)]">
+              <div className="grid gap-4 md:grid-cols-[260px_180px_minmax(0,1fr)]">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">Knowledge base</label>
                   <Select value={kbId} onValueChange={setKbId}>
@@ -142,6 +173,21 @@ export function KnowledgeOpsAgentPage() {
                   ) : null}
                 </div>
                 <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">Scenario</label>
+                  <Select value={scenario} onValueChange={setScenario}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Scenario" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SCENARIOS.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">Agent task</label>
                   <Textarea
                     value={task}
@@ -150,6 +196,15 @@ export function KnowledgeOpsAgentPage() {
                     placeholder="Describe what the agent should evaluate"
                   />
                 </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">Benchmark questions</label>
+                <Textarea
+                  value={benchmarkQuestions}
+                  onChange={(event) => setBenchmarkQuestions(event.target.value)}
+                  className="min-h-[112px] font-mono text-xs"
+                  placeholder="One benchmark question per line"
+                />
               </div>
               <div className="flex justify-end">
                 <Button onClick={handleRun} disabled={running || !kbId} className="gap-2">
@@ -212,7 +267,7 @@ export function KnowledgeOpsAgentPage() {
                   </div>
                 ) : (
                   <div className="space-y-5">
-                    <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                       <div className="rounded-md border border-slate-200 p-4">
                         <p className="text-xs uppercase text-slate-400">Coverage</p>
                         <p className="mt-2 text-xl font-semibold text-slate-900">{report.coverageLevel || "--"}</p>
@@ -222,10 +277,45 @@ export function KnowledgeOpsAgentPage() {
                         <p className="mt-2 text-xl font-semibold text-slate-900">{report.coverageScore ?? "--"}</p>
                       </div>
                       <div className="rounded-md border border-slate-200 p-4">
-                        <p className="text-xs uppercase text-slate-400">Run</p>
-                        <p className="mt-2 truncate text-sm font-medium text-slate-900">{activeRun?.id}</p>
+                        <p className="text-xs uppercase text-slate-400">Scenario</p>
+                        <p className="mt-2 text-xl font-semibold text-slate-900">{report.scenario || metricValue(metrics, "scenario")}</p>
+                      </div>
+                      <div className="rounded-md border border-slate-200 p-4">
+                        <p className="text-xs uppercase text-slate-400">Hit rate</p>
+                        <p className="mt-2 text-xl font-semibold text-slate-900">{metricValue(metrics, "benchmarkHitRate")}</p>
+                      </div>
+                      <div className="rounded-md border border-slate-200 p-4">
+                        <p className="text-xs uppercase text-slate-400">Gap</p>
+                        <p className="mt-2 text-xl font-semibold text-slate-900">{metricValue(metrics, "gapLevel")}</p>
+                      </div>
+                      <div className="rounded-md border border-slate-200 p-4">
+                        <p className="text-xs uppercase text-slate-400">Weak questions</p>
+                        <p className="mt-2 text-xl font-semibold text-slate-900">{metricValue(metrics, "weakQuestionCount")}</p>
                       </div>
                     </div>
+
+                    {report.planReason ? (
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                        {report.planReason}
+                      </div>
+                    ) : null}
+
+                    {metrics ? (
+                      <section>
+                        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                          <BarChart3 className="h-4 w-4 text-indigo-600" />
+                          Metrics
+                        </h3>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                          {Object.entries(metrics).map(([key, value]) => (
+                            <div key={key} className="flex items-center justify-between gap-3 rounded-md bg-slate-50 px-3 py-2 text-xs">
+                              <span className="text-slate-500">{key}</span>
+                              <span className="truncate font-medium text-slate-800">{String(value ?? "--")}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    ) : null}
 
                     <section>
                       <h3 className="text-sm font-semibold text-slate-800">Findings</h3>

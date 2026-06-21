@@ -27,21 +27,17 @@ import com.nageoffer.ai.ragent.agent.controller.vo.KnowledgeOpsReportVO;
 import com.nageoffer.ai.ragent.agent.controller.vo.KnowledgeOpsRunVO;
 import com.nageoffer.ai.ragent.agent.controller.vo.KnowledgeOpsStepVO;
 import com.nageoffer.ai.ragent.agent.core.AgentReporter;
-import com.nageoffer.ai.ragent.agent.core.AgentStepRecorder;
 import com.nageoffer.ai.ragent.agent.dao.entity.KnowledgeOpsRunDO;
 import com.nageoffer.ai.ragent.agent.dao.entity.KnowledgeOpsStepDO;
 import com.nageoffer.ai.ragent.agent.dao.mapper.KnowledgeOpsRunMapper;
 import com.nageoffer.ai.ragent.agent.dao.mapper.KnowledgeOpsStepMapper;
-import com.nageoffer.ai.ragent.agent.domain.AgentToolResult;
+import com.nageoffer.ai.ragent.agent.domain.AgentPlan;
 import com.nageoffer.ai.ragent.agent.domain.KnowledgeOpsContext;
 import com.nageoffer.ai.ragent.agent.domain.KnowledgeOpsReport;
 import com.nageoffer.ai.ragent.agent.enums.KnowledgeOpsRunStatus;
+import com.nageoffer.ai.ragent.agent.executor.KnowledgeOpsAgentExecutor;
+import com.nageoffer.ai.ragent.agent.planner.KnowledgeOpsPlanner;
 import com.nageoffer.ai.ragent.agent.service.KnowledgeOpsAgentService;
-import com.nageoffer.ai.ragent.agent.tool.AgentTool;
-import com.nageoffer.ai.ragent.agent.tool.ChunkQualityInspectTool;
-import com.nageoffer.ai.ragent.agent.tool.CoverageEvaluateTool;
-import com.nageoffer.ai.ragent.agent.tool.KnowledgeBaseProfileTool;
-import com.nageoffer.ai.ragent.agent.tool.KnowledgeRetrievalTool;
 import com.nageoffer.ai.ragent.framework.context.UserContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -49,25 +45,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class KnowledgeOpsAgentServiceImpl implements KnowledgeOpsAgentService {
 
-    private static final List<String> WORKFLOW = List.of(
-            KnowledgeBaseProfileTool.TOOL_NAME,
-            KnowledgeRetrievalTool.TOOL_NAME,
-            ChunkQualityInspectTool.TOOL_NAME,
-            CoverageEvaluateTool.TOOL_NAME
-    );
-
     private final KnowledgeOpsRunMapper runMapper;
     private final KnowledgeOpsStepMapper stepMapper;
-    private final List<AgentTool> tools;
-    private final AgentStepRecorder stepRecorder;
+    private final KnowledgeOpsPlanner planner;
+    private final KnowledgeOpsAgentExecutor executor;
     private final AgentReporter reporter;
 
     @Override
@@ -88,20 +74,16 @@ public class KnowledgeOpsAgentServiceImpl implements KnowledgeOpsAgentService {
                 .kbId(request.getKbId())
                 .task(request.getTask())
                 .topK(request.getTopK())
+                .scenario(request.getScenario())
+                .requestedWorkflow(request.getWorkflow())
+                .benchmarkQuestions(request.getBenchmarkQuestions())
                 .build();
 
         try {
-            Map<String, AgentTool> toolMap = tools.stream()
-                    .collect(Collectors.toMap(AgentTool::name, Function.identity()));
-            int order = 1;
-            for (String toolName : WORKFLOW) {
-                AgentTool tool = toolMap.get(toolName);
-                if (tool == null) {
-                    throw new IllegalStateException("Agent tool not found: " + toolName);
-                }
-                executeTool(run.getId(), order++, tool, context);
-            }
-
+            AgentPlan plan = planner.plan(context);
+            context.setPlan(plan);
+            context.setScenario(plan.getScenario());
+            executor.execute(plan, context);
             KnowledgeOpsReport report = reporter.buildReport(context);
             run.setStatus(KnowledgeOpsRunStatus.SUCCESS.name());
             run.setSummary(report.getSummary());
@@ -147,21 +129,6 @@ public class KnowledgeOpsAgentServiceImpl implements KnowledgeOpsAgentService {
         return stepList.stream().map(this::toStepVO).toList();
     }
 
-    private void executeTool(String runId, int order, AgentTool tool, KnowledgeOpsContext context) {
-        KnowledgeOpsStepDO step = stepRecorder.start(runId, order, tool.type(), tool.name(), Map.of(
-                "kbId", context.getKbId(),
-                "task", context.getTask()
-        ));
-        try {
-            AgentToolResult result = tool.execute(context);
-            context.putResult(tool.name(), result);
-            stepRecorder.success(step, result);
-        } catch (Exception ex) {
-            stepRecorder.failure(step, ex);
-            throw ex;
-        }
-    }
-
     private KnowledgeOpsRunVO toRunVOWithoutSteps(KnowledgeOpsRunDO run) {
         return KnowledgeOpsRunVO.builder()
                 .id(run.getId())
@@ -201,9 +168,12 @@ public class KnowledgeOpsAgentServiceImpl implements KnowledgeOpsAgentService {
         return KnowledgeOpsReportVO.builder()
                 .coverageLevel(report.getCoverageLevel())
                 .coverageScore(report.getCoverageScore())
+                .scenario(report.getScenario())
+                .planReason(report.getPlanReason())
                 .summary(report.getSummary())
                 .findings(report.getFindings())
                 .recommendations(report.getRecommendations())
+                .metrics(report.getMetrics())
                 .markdown(report.getMarkdown())
                 .build();
     }
